@@ -5,6 +5,9 @@ import { db } from "./db";
 import { redis } from "./redis";
 import { serverConfig } from "./config";
 import { hashPassword } from "./password";
+import path from "node:path";
+import * as fs from "node:fs";
+import type { PoolClient } from "pg";
 
 const INITIALIZATION_LOCK = 741852963;
 
@@ -25,6 +28,8 @@ const REQUIRED_COLUMNS: Record<string, string[]> = {
     "password_changed_at",
     "created_at",
     "updated_at",
+    "session_version",
+    "deleted_at",
   ],
 
   login_audit: [
@@ -44,86 +49,77 @@ const REQUIRED_COLUMNS: Record<string, string[]> = {
     "expires_at",
     "created_at",
   ],
+
+  system_roles: [
+    "id",
+    "name",
+    "label",
+    "description",
+    "permissions",
+    "is_system",
+    "created_at",
+    "updated_at",
+  ],
+
+  user_invitations: [
+    "id",
+    "email",
+    "username",
+    "role",
+    "token_hash",
+    "invited_by",
+    "expires_at",
+    "accepted_at",
+    "revoked_at",
+    "created_at",
+  ],
+
+  security_audit: [
+    "id",
+    "user_id",
+    "username",
+    "action",
+    "category",
+    "description",
+    "ip_address",
+    "user_agent",
+    "metadata",
+    "success",
+    "created_at",
+  ],
 };
 
 export async function CheckDatabase(): Promise<void> {
   await db.query("SELECT 1");
 }
 
-export async function CreateTables(
-  client: import("pg").PoolClient
-): Promise<void> {
-  await client.query(`
-    CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+export async function CreateTables(client: PoolClient): Promise<void> {
+  const sqlFilePath = path.join(
+    process.cwd(),
+    "src",
+    "config",
+    "table.sql"
+  );
 
-    CREATE TABLE IF NOT EXISTS users (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      username VARCHAR(50) NOT NULL,
-      email VARCHAR(255) DEFAULT NULL,
-      password_hash TEXT NOT NULL,
-      role VARCHAR(30) NOT NULL DEFAULT 'admin',
-      is_active BOOLEAN NOT NULL DEFAULT TRUE,
-      is_locked BOOLEAN NOT NULL DEFAULT FALSE,
-      failed_login_attempts INTEGER NOT NULL DEFAULT 0,
-      last_login_at TIMESTAMPTZ DEFAULT NULL,
-      password_changed_at TIMESTAMPTZ DEFAULT NOW(),
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      CONSTRAINT users_username_unique UNIQUE (username)
+  if (!fs.existsSync(sqlFilePath)) {
+    throw new Error(
+      `[Database] SQL schema file not found: ${sqlFilePath}`
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS
-        users_single_superadmin_idx
-    ON users (role)
-    WHERE role = 'superadmin';
-    CREATE INDEX IF NOT EXISTS idx_users_active
-      ON users (username, is_active);
+  }
 
-    CREATE INDEX IF NOT EXISTS idx_users_email
-      ON users (email);
+  const sqlQueries = fs.readFileSync(sqlFilePath, "utf8");
 
-    CREATE INDEX IF NOT EXISTS idx_users_role
-      ON users (role);
+  if (!sqlQueries.trim()) {
+    throw new Error("[Database] SQL schema file is empty.");
+  }
 
-    CREATE TABLE IF NOT EXISTS login_audit (
-      id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-      user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-      username VARCHAR(50),
-      ip_address INET,
-      user_agent TEXT,
-      success BOOLEAN NOT NULL DEFAULT FALSE,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
+  await client.query(sqlQueries);
 
-    CREATE INDEX IF NOT EXISTS idx_login_audit_user_id
-      ON login_audit (user_id);
-
-    CREATE INDEX IF NOT EXISTS idx_login_audit_username
-      ON login_audit (username);
-
-    CREATE INDEX IF NOT EXISTS idx_login_audit_created_at
-      ON login_audit (created_at);
-
-    CREATE TABLE IF NOT EXISTS password_reset_tokens (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-      token VARCHAR(255) NOT NULL,
-      expires_at TIMESTAMPTZ NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id
-      ON password_reset_tokens (user_id);
-
-    CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_token
-      ON password_reset_tokens (token);
-
-    CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires_at
-      ON password_reset_tokens (expires_at);
-  `);
+  console.info("[Database] SQL schema executed.");
 }
 
 export async function VerifyDatabaseStructure(
-  client: import("pg").PoolClient
+  client: PoolClient
 ): Promise<void> {
   for (const [table, requiredColumns] of Object.entries(
     REQUIRED_COLUMNS
@@ -132,14 +128,16 @@ export async function VerifyDatabaseStructure(
       `
         SELECT column_name
         FROM information_schema.columns
-        WHERE table_schema = current_schema()
+        WHERE table_schema = 'public'
           AND table_name = $1
       `,
       [table]
     );
 
     const existingColumns = new Set(
-      result.rows.map((row: { column_name: string }) => row.column_name)
+      result.rows.map(
+        (row: { column_name: string }) => row.column_name
+      )
     );
 
     const missingColumns = requiredColumns.filter(
@@ -152,14 +150,12 @@ export async function VerifyDatabaseStructure(
       );
     }
   }
-  await client.query(`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower_unique
-    ON users (LOWER(username));
-  `);
+
+  console.info("[Database] All required tables and columns verified.");
 }
 
 export async function RootUserInjection(
-  client: import("pg").PoolClient
+  client: PoolClient
 ): Promise<void> {
   const username = serverConfig.root.username;
   const configuredPassword = serverConfig.root.password;
@@ -173,6 +169,7 @@ export async function RootUserInjection(
       SELECT id, role
       FROM users
       WHERE LOWER(username) = LOWER($1)
+        AND deleted_at IS NULL
       LIMIT 1
     `,
     [username]
@@ -184,6 +181,7 @@ export async function RootUserInjection(
         `[Root Admin] Username "${username}" already exists but is not a root account.`
       );
     }
+
     return;
   }
 
@@ -220,13 +218,16 @@ export async function RootUserInjection(
       SELECT role
       FROM users
       WHERE LOWER(username) = LOWER($1)
+        AND deleted_at IS NULL
       LIMIT 1
     `,
     [username]
   );
 
   if (verification.rows[0]?.role !== "root") {
-    throw new Error("[Root Admin] Root account creation could not be verified.");
+    throw new Error(
+      "[Root Admin] Root account creation could not be verified."
+    );
   }
 
   console.info("[Root Admin] Root account is ready.");
@@ -243,10 +244,14 @@ export async function InitializeDatabase(): Promise<void> {
       "SELECT pg_advisory_lock($1)",
       [INITIALIZATION_LOCK]
     );
+
     lockAcquired = true;
 
     await client.query("BEGIN");
     transactionStarted = true;
+
+    // Explicitly select the PostgreSQL schema for this transaction.
+    await client.query("SET LOCAL search_path TO public");
 
     await CreateTables(client);
     await VerifyDatabaseStructure(client);
@@ -255,7 +260,7 @@ export async function InitializeDatabase(): Promise<void> {
     await client.query("COMMIT");
     transactionStarted = false;
 
-    console.info("[Database] Schema verification completed.");
+    console.info("[Database] Initialization completed successfully.");
   } catch (error) {
     if (transactionStarted) {
       await client.query("ROLLBACK").catch(() => undefined);
@@ -350,7 +355,10 @@ export async function CloseServer(): Promise<void> {
 
   for (const result of results) {
     if (result.status === "rejected") {
-      console.error("[Shutdown] Resource close error:", result.reason);
+      console.error(
+        "[Shutdown] Resource close error:",
+        result.reason
+      );
     }
   }
 

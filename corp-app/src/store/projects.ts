@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-interface ProjectsState {
+    interface ProjectsState {
     isHovered: boolean;
     currentIndex: number;
     setIsHovered: (value: boolean) => void;

@@ -108,3 +108,22 @@ export async function requireAdminSession(): Promise<AdminSession> {
 
   return session;
 }
+
+const USER_SESSION_INDEX = (userId: string) =>
+  `admin:user-sessions:${userId}`;
+
+async function registerUserSession(userId: string, sessionKey: string) {
+  await redis.sadd(USER_SESSION_INDEX(userId), sessionKey);
+  await redis.expire(USER_SESSION_INDEX(userId), 60 * 60 * 9);
+}
+
+export async function revokeUserSessions(userId: string) {
+  const indexKey = USER_SESSION_INDEX(userId);
+  const sessionKeys = await redis.smembers(indexKey);
+
+  if (sessionKeys.length) {
+    await redis.del(...sessionKeys);
+  }
+
+  await redis.del(indexKey);
+}

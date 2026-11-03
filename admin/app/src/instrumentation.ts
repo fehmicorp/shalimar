@@ -1,4 +1,3 @@
-
 import { InitializeServer } from "@/lib/server/initialize";
 
 export async function register() {
