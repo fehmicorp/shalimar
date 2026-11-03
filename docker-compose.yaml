@@ -5,7 +5,18 @@ services:
     env_file:
       - .env
     ports:
-      - 3000:3000
+      - ${CORP_APP_PORT}:3000
+    depends_on:
+      - pgsql
+      - redis
+
+  admin:
+    container_name: Admin Panel
+    build: shalimar-admin:1.0.1
+    env_file:
+      - .env
+    ports:
+      - ${ADMIN_APP_PORT}:3000
     depends_on:
       - pgsql
       - redis
@@ -16,7 +27,15 @@ services:
     env_file:
       - .env
     ports:
-      - 9090:9090
+      - ${S3_MINIO_PORT}:9090
+      - ${S3_ADMIN_PORT}:9091
+      - ${S3_APP_PORT}:9098
+    volumes:
+      - s3-data:/data
+      - s3-backup:/backup
+    depends_on:
+      - pgsql
+      - redis
 
   pgsql:
     container_name: Postgresql Database
@@ -45,9 +64,17 @@ services:
     cloudflare:
       image: cloudflare/cloudflared:latest
       container_name: cloudflare-tunnel
-      command: tunnel --no-autoupdate run --token {{CF_TOKEN_YAML}}
+      command: tunnel --no-autoupdate run --token {{CF_TOKEN}}
       restart: unless-stopped
 
 volumes:
   redis: ./data/redis
   postgres: ./data/postgres
+  s3-data: ./data/s3/data
+  s3-backup: ./data/s3/backup
+
+networks:
+  default:
+    external:
+      name: shalimar-network
+      ipv4_address:

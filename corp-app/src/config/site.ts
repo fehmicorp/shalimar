@@ -6,7 +6,7 @@ export const siteConfig = {
   ogImage: "https://www.shalimarcorp.com/og-image.jpg",
   
   analytics: {
-    gtmId: process.env.GTM_ID || "GTM-XXXXXXX",
+    gtmId: process.env.GTM_ID || "GTM-NWF8KCG",
     gaId: process.env.GA_ID || "G-XXXXXXX",
   },
 
@@ -54,7 +54,7 @@ export const siteConfig = {
   ],
 
   other: {
-    "google-site-verification": "n70tmLodj2RjMAEgdc_YvVarw0nwDSkOVnsLdRtGDrA",
+    "google-site-verification": process.env.GOOGLE_SITE_VERIFICATION || "8XaLaVojmEDyNS22m_6sUBOKXsbmnxlYl_onXs_pA_M",
   },
 } as const;
 
@@ -104,3 +104,18 @@ export function constructMetadata({
     }),
   };
 }
+
+const s3Address = process.env.S3_ADDRESS || "http://localhost:9098/";
+const bucketName = process.env.APP_BUCKET_TAG || "assets";
+const accessToken = process.env.S3_SECRET_ACCESS_TOKEN || "";
+const accessTokenHeader = process.env.S3_SECRET_ACCESS_TOKEN_HEADER || "X-SecretAccessToken";
+
+export const assetsConfig = {
+  s3Address,
+  BucketName: bucketName,
+  asset: `${s3Address}${bucketName}/`,
+  accessToken: accessToken,
+  accessTokenHeader: accessTokenHeader,
+} as const;
+
+export type AssetsConfig = typeof assetsConfig;

@@ -15,9 +15,9 @@ import (
 var minioClient *minio.Client
 var cfg *Config
 var (
-	serviceToken = env.GetString("APP_SECRET_ACCESS_TOKEN", "")
-	Port         = env.GetInt("APP_PORT", 9098)
-	Ver          = env.GetString("VERSION", "v1")
+	serviceToken = env.GetString("S3_APP_SECRET_ACCESS_TOKEN", "")
+	Port         = env.GetInt("S3_APP_PORT", 9098)
+	Ver          = env.GetString("S3_VERSION", "v1")
 	redisClient  *redis.Client
 	ctx          = context.Background()
 )

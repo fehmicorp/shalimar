@@ -9,15 +9,15 @@ import (
 )
 
 func Client() (*minio.Client, error) {
-	minIOPort := env.GetInt("MINIO_PORT", 9090)
+	minIOPort := env.GetInt("S3_MINIO_PORT", 9090)
 	minIOHost := fmt.Sprintf("localhost:%d", minIOPort)
 
-	accessKeyId := env.GetString("APP_ACCESS_KEY_ID", "minioadmin")
-	secretAccessKey := env.GetString("APP_SECRET_ACCESS_KEY", "minioadmin")
-	// secretAccessToken := env.GetString("APP_SECRET_ACCESS_TOKEN", "")
+	accessKeyId := env.GetString("S3_APP_ACCESS_KEY_ID", "minioadmin")
+	secretAccessKey := env.GetString("S3_APP_SECRET_ACCESS_KEY", "minioadmin")
+	// secretAccessToken := env.GetString("S3_APP_SECRET_ACCESS_TOKEN", "")
 
-	useSSL := env.GetBool("APP_USE_SSL", false)
-	maxConnections := env.GetInt("APP_MAX_CONNECTIONS", 100)
+	useSSL := env.GetBool("S3_APP_USE_SSL", false)
+	maxConnections := env.GetInt("S3_APP_MAX_CONNECTIONS", 100)
 
 	client, err := minio.New(minIOHost, &minio.Options{
 		Creds:        credentials.NewStaticV4(accessKeyId, secretAccessKey, ""),
